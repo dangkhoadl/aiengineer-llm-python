@@ -88,8 +88,10 @@ async def root():
     return {"status": "ok", "service": "Customer Service AI"}
 
 
+# Plain def (not async): llm.invoke() blocks, so FastAPI must run this in its thread pool.
+# As async def, one slow LLM call froze the event loop and every other request timed out.
 @app.post("/query", response_model=QueryResponse)
-async def query(request: QueryRequest) -> QueryResponse:
+def query(request: QueryRequest) -> QueryResponse:
     """
     Process customer service queries with guardrails.
     
@@ -107,12 +109,12 @@ async def query(request: QueryRequest) -> QueryResponse:
         with tracer.start_as_current_span("customer_query") as span:
             span.set_attribute("input.value", question)
             span.set_attribute("input.length", len(question))
-            return await _process_query(question, span)
+            return _process_query(question, span)
     else:
-        return await _process_query(question, None)
+        return _process_query(question, None)
 
 
-async def _process_query(question: str, parent_span) -> QueryResponse:
+def _process_query(question: str, parent_span) -> QueryResponse:
     """Internal function to process query with optional tracing."""
     
     # Step 1: Input filtering
