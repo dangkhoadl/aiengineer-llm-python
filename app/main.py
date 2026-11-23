@@ -12,6 +12,7 @@ from app.guardrails import (
     detect_policy_violation,
     moderate_output,
 )
+from app.semantic_guard import detect_semantic_attack
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -173,7 +174,22 @@ async def _process_query(question: str, parent_span) -> QueryResponse:
             blocked=True,
             reason=f"I cannot process this request. Reason: {violation_reason}",
         )
-    
+
+    # Step 3b: Semantic guard (catches paraphrases the keyword rules miss; fails open)
+    is_attack, attack_reason = detect_semantic_attack(filtered_question)
+    if parent_span:
+        parent_span.set_attribute("guardrail.semantic.passed", not is_attack)
+    if is_attack:
+        logger.warning(f"Semantic guard blocked: {attack_reason}")
+        if parent_span:
+            parent_span.set_attribute("output.blocked", True)
+            parent_span.set_attribute("output.block_reason", "semantic_guard")
+        return QueryResponse(
+            answer="",
+            blocked=True,
+            reason=f"I cannot process this request. Reason: {attack_reason}",
+        )
+
     # Step 4: Call LLM
     try:
         full_prompt = f"{SYSTEM_PROMPT}\n\nCustomer: {filtered_question}\n\nAssistant:"
