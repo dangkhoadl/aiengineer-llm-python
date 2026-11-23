@@ -5,7 +5,8 @@ question and compares it with two hand-written example lists. None of the exampl
 data/qa_dataset.json, so the evaluation stays a held-out test.
 
 score = max cosine similarity to ATTACK_EXAMPLES - max cosine similarity to SAFE_EXAMPLES
-The question is blocked when score > SEMANTIC_MARGIN.
+The question is blocked when score > SEMANTIC_MARGIN + SEMANTIC_SOFT_BAND. A score just above
+the margin (inside the soft band) gets a "please rephrase" reply instead of a hard block.
 
 If the embedding call fails, the guard fails open: it allows the question and logs a warning.
 The regex and keyword checks still run before it.
@@ -18,7 +19,7 @@ from typing import Tuple
 import httpx
 import numpy as np
 
-from app.config import EMBEDDING_MODEL, OLLAMA_BASE_URL, SEMANTIC_MARGIN
+from app.config import EMBEDDING_MODEL, OLLAMA_BASE_URL, SEMANTIC_MARGIN, SEMANTIC_SOFT_BAND
 
 logger = logging.getLogger(__name__)
 
@@ -98,20 +99,26 @@ def semantic_score(text: str) -> Tuple[float, str]:
     return score, ATTACK_EXAMPLES[nearest]
 
 
-def detect_semantic_attack(text: str) -> Tuple[bool, str]:
+def semantic_decision(text: str) -> Tuple[str, str]:
     """
-    Detect attacks and off-topic questions by meaning, not keywords.
+    Decide by meaning, not keywords, whether to answer a question.
 
     Returns:
-        Tuple of (is_attack_detected, reason)
+        Tuple of (action, reason). action is one of:
+        - "allow":   score <= SEMANTIC_MARGIN
+        - "clarify": SEMANTIC_MARGIN < score <= SEMANTIC_MARGIN + SEMANTIC_SOFT_BAND
+                     (close call: ask the customer to rephrase instead of a hard block)
+        - "block":   score above the soft band
     """
     try:
         score, nearest = semantic_score(text)
     except (httpx.HTTPError, KeyError, ValueError) as e:
         logger.warning(f"Semantic guard unavailable, failing open: {e}")
-        return False, ""
+        return "allow", ""
 
     logger.info(f"Semantic guard score={score:.3f} nearest='{nearest}'")
+    if score > SEMANTIC_MARGIN + SEMANTIC_SOFT_BAND:
+        return "block", f"Semantic guard: similar to a blocked request (score {score:.2f})"
     if score > SEMANTIC_MARGIN:
-        return True, f"Semantic guard: similar to a blocked request (score {score:.2f})"
-    return False, ""
+        return "clarify", f"Semantic guard: unclear request (score {score:.2f})"
+    return "allow", ""

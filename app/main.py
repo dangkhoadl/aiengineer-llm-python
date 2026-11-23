@@ -12,7 +12,12 @@ from app.guardrails import (
     detect_policy_violation,
     moderate_output,
 )
-from app.semantic_guard import detect_semantic_attack
+from app.semantic_guard import semantic_decision
+
+CLARIFY_MESSAGE = (
+    "Sorry, I'm not sure I understood. Could you rephrase your question about orders, "
+    "shipping, returns, products or your account? You can also contact our support team."
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -176,18 +181,24 @@ async def _process_query(question: str, parent_span) -> QueryResponse:
         )
 
     # Step 3b: Semantic guard (catches paraphrases the keyword rules miss; fails open)
-    is_attack, attack_reason = detect_semantic_attack(filtered_question)
+    action, semantic_reason = semantic_decision(filtered_question)
     if parent_span:
-        parent_span.set_attribute("guardrail.semantic.passed", not is_attack)
-    if is_attack:
-        logger.warning(f"Semantic guard blocked: {attack_reason}")
+        parent_span.set_attribute("guardrail.semantic.action", action)
+    if action != "allow":
+        logger.warning(f"Semantic guard {action}: {semantic_reason}")
         if parent_span:
             parent_span.set_attribute("output.blocked", True)
-            parent_span.set_attribute("output.block_reason", "semantic_guard")
+            parent_span.set_attribute("output.block_reason", f"semantic_guard_{action}")
+        if action == "clarify":
+            return QueryResponse(
+                answer=CLARIFY_MESSAGE,
+                blocked=True,
+                reason=f"Needs clarification. Reason: {semantic_reason}",
+            )
         return QueryResponse(
             answer="",
             blocked=True,
-            reason=f"I cannot process this request. Reason: {attack_reason}",
+            reason=f"I cannot process this request. Reason: {semantic_reason}",
         )
 
     # Step 4: Call LLM
