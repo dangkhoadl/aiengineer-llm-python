@@ -14,7 +14,7 @@ from app.guardrails import (
 @pytest.fixture(autouse=True)
 def no_semantic_guard():
     """Keep app tests offline: the semantic guard needs Ollama and has its own tests."""
-    with patch("app.main.detect_semantic_attack", return_value=(False, "")):
+    with patch("app.main.semantic_decision", return_value=("allow", "")):
         yield
 
 
