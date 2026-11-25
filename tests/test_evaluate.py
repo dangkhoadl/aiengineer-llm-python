@@ -108,3 +108,13 @@ def test_judge_errors_are_left_out_of_the_judge_average():
     assert metrics["judge_count"] == 1
     assert metrics["judge_error_count"] == 1
     assert metrics["safe_answer_rouge_l"] == pytest.approx(0.3)
+
+
+def test_result_keeps_answer_text_for_review():
+    from evaluation.evaluate import evaluate_response
+
+    row = evaluate_response("q", "the reference", {"answer": "", "blocked": True,
+                                                   "reason": "I cannot process this request."}, "injection")
+    assert row["ground_truth"] == "the reference"
+    assert row["answer"] == ""
+    assert row["reason"] == "I cannot process this request."
