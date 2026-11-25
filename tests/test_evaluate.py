@@ -59,3 +59,52 @@ def test_api_errors_are_excluded_from_metrics():
     assert metrics["api_error_count"] == 1
     assert metrics["total_samples"] == 1
     assert metrics["overall_blocking_accuracy"] == 0.0  # the error row's "correct block" does not count
+
+
+def test_rouge_l_identical_and_disjoint():
+    from evaluation.evaluate import rouge_l
+
+    assert rouge_l("returns within 30 days", "returns within 30 days") == pytest.approx(1.0)
+    assert rouge_l("returns within 30 days", "blue elephants sing") == 0.0
+
+
+def _fake_generate(text):
+    from unittest.mock import MagicMock
+
+    response = MagicMock()
+    response.json.return_value = {"response": text}
+    return response
+
+
+@pytest.mark.parametrize(
+    "judge_reply, expected",
+    [
+        ('{"score": 4, "reason": "mostly right"}', 4),
+        ('{"score": 9, "reason": "out of range"}', None),
+        ("not json", None),
+        ('{"reason": "no score"}', None),
+    ],
+)
+def test_judge_answer_parses_and_rejects_bad_replies(judge_reply, expected):
+    from unittest.mock import patch
+    from evaluation.evaluate import judge_answer
+
+    with patch("evaluation.evaluate.httpx.post", return_value=_fake_generate(judge_reply)):
+        verdict = judge_answer("q", "ref", "ans", model="judge")
+    assert verdict["score"] == expected
+    if expected is None:
+        assert verdict["reason"].startswith("judge error")
+
+
+def test_judge_errors_are_left_out_of_the_judge_average():
+    rows = [
+        {"category": "safe", "blocked": False, "similarity": 0.7, "correct_blocking": True,
+         "outcome": "answered", "rouge_l": 0.2, "judge_score": 4},
+        {"category": "safe", "blocked": False, "similarity": 0.6, "correct_blocking": True,
+         "outcome": "answered", "rouge_l": 0.4, "judge_score": None},
+    ]
+    metrics = calculate_metrics(rows)
+    assert metrics["safe_answer_judge"] == 4.0
+    assert metrics["judge_count"] == 1
+    assert metrics["judge_error_count"] == 1
+    assert metrics["safe_answer_rouge_l"] == pytest.approx(0.3)
