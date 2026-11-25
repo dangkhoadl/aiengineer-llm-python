@@ -187,6 +187,10 @@ def _evaluate_response_internal(
     result = {
         "prompt": prompt[:200] + "..." if len(prompt) > 200 else prompt,
         "category": category,
+        # Saved so answers can be read back, graded by hand, or re-judged later
+        "ground_truth": ground_truth,
+        "answer": api_response.get("answer", ""),
+        "reason": api_response.get("reason", ""),
         "blocked": api_response.get("blocked", False),
         "similarity": 0.0,
         "correct_blocking": False
